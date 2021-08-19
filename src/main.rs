@@ -1,16 +1,37 @@
 use std::sync::Arc;
 use vulkano::buffer::cpu_access::CpuAccessibleBuffer;
 use vulkano::buffer::BufferUsage;
+use vulkano::command_buffer::SubpassContents;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryCommandBuffer};
 use vulkano::descriptor_set::persistent::PersistentDescriptorSet;
 use vulkano::device::physical::PhysicalDevice;
 use vulkano::device::{Device, DeviceExtensions, Features};
+use vulkano::format::ClearValue;
+use vulkano::format::Format;
+use vulkano::image::view::ImageView;
+use vulkano::image::{ImageDimensions, StorageImage};
 use vulkano::instance::{Instance, InstanceExtensions};
-use vulkano::pipeline::layout::PipelineLayout;
 use vulkano::pipeline::ComputePipeline;
 use vulkano::pipeline::ComputePipelineAbstract;
+use vulkano::render_pass::Framebuffer;
 use vulkano::sync::GpuFuture;
 use vulkano::Version;
+
+use image::{ImageBuffer, Rgba};
+
+mod cs {
+    vulkano_shaders::shader! {
+    ty: "compute",
+    path: "src/mandelbrot.glsl"
+    }
+}
+
+#[derive(Default, Copy, Clone)]
+struct Vertex {
+    pos: [f32; 2],
+}
+
+vulkano::impl_vertex!(Vertex, pos);
 
 fn main() {
     // Instantiate vulkan
@@ -51,49 +72,58 @@ fn main() {
     // Get the first queue
     let queue = queues.next().unwrap();
 
-    // Create source buffer
-    let source_content = 0..64;
-    let source =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, source_content)
-            .expect("failed to create buffer");
-
-    // Create a destination buffer
-    let dest_content = (0..64).map(|_| 0);
-    let dest =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, dest_content)
-            .expect("failed to create buffer");
-
-    // Create a builder that will batch the commands
-    let mut builder = AutoCommandBufferBuilder::primary(
+    // Image in the device
+    let image = StorageImage::new(
         device.clone(),
-        queue.family(),
-        CommandBufferUsage::MultipleSubmit,
+        ImageDimensions::Dim2d {
+            width: 1024,
+            height: 1024,
+            array_layers: 1,
+        },
+        Format::R8G8B8A8Unorm,
+        Some(queue.family()),
     )
     .unwrap();
 
-    // Send the command copy buffer to the builder
-    builder.copy_buffer(source.clone(), dest.clone()).unwrap();
+    let view = ImageView::new(image.clone()).unwrap();
 
-    // Build the batch commands
-    let command_buffer = builder.build().unwrap();
+    let vertex1 = Vertex { pos: [-0.5, -0.5] };
+    let vertex2 = Vertex { pos: [0.0, 0.5] };
+    let vertex3 = Vertex { pos: [0.5, -0.25] };
 
-    // Execute the commands and wait for them to finish
-    let finished = command_buffer.execute(queue.clone()).unwrap();
-    finished
-        .then_signal_fence_and_flush()
-        .unwrap()
-        .wait(None)
-        .unwrap();
+    let vertex_buffer = CpuAccessibleBuffer::from_iter(
+        device.clone(),
+        BufferUsage::all(),
+        false,
+        vec![vertex1, vertex2, vertex3].into_iter(),
+    )
+    .expect("failed to create buffer");
 
-    // Read both buffers and assert they are equal
-    let src_content = source.read().unwrap();
-    let dest_content = dest.read().unwrap();
-    assert_eq!(&*src_content, &*dest_content);
+    let render_pass = Arc::new(
+        vulkano::single_pass_renderpass!(device.clone(),
+                     attachments: {
+                         color: {
+                             load: Clear,
+                             store: Store,
+                             format: Format::R8G8B8A8Unorm,
+                             samples: 1,
+                         }
+                     },
+                     pass: {
+                         color: [color],
+                         depth_stencil: {}
+                     }
+        )
+        .unwrap(),
+    );
 
-    let data_iter = 0..65536;
-    let data_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, data_iter)
-            .expect("failed to build buffer");
+    let frambuffer = Arc::new(
+        Framebuffer::start(render_pass.clone())
+            .add(view)
+            .unwrap()
+            .build()
+            .unwrap(),
+    );
 
     let shader = cs::Shader::load(device.clone()).expect("failed to create shader module");
 
@@ -107,9 +137,10 @@ fn main() {
         .descriptor_set_layouts()
         .get(0)
         .unwrap();
+
     let set = Arc::new(
         PersistentDescriptorSet::start(layout.clone())
-            .add_buffer(data_buffer.clone())
+            .add_image(view.clone())
             .unwrap()
             .build()
             .unwrap(),
@@ -118,45 +149,33 @@ fn main() {
     let mut builder = AutoCommandBufferBuilder::primary(
         device.clone(),
         queue.family(),
-        CommandBufferUsage::MultipleSubmit,
+        CommandBufferUsage::OneTimeSubmit,
     )
     .unwrap();
 
     builder
-        .dispatch([1024, 1, 1], compute_pipeline.clone(), set.clone(), ())
+        .begin_render_pass(
+            frambuffer.clone(),
+            SubpassContents::Inline,
+            vec![[0.0, 0.0, 1.0, 1.0].into()],
+        )
+        .unwrap()
+        .end_render_pass()
         .unwrap();
+
     let command_buffer = builder.build().unwrap();
 
     let finished = command_buffer.execute(queue.clone()).unwrap();
+
     finished
         .then_signal_fence_and_flush()
         .unwrap()
         .wait(None)
         .unwrap();
-    let content = data_buffer.read().unwrap();
-    for (n, val) in content.iter().enumerate() {
-        if n % 1000 == 0 {
-            println!("{} {}", n, *val);
-        }
-    }
+
+    let buffer_content = buf.read().unwrap();
+    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(4096, 4096, &buffer_content[..]).unwrap();
+    image.save("out.png").unwrap();
+
     println!("\nEverything succeded!");
-}
-
-mod cs {
-    vulkano_shaders::shader! {
-    ty: "compute",
-    src: "
-#version 450
-
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
-
-layout(set = 0, binding = 0) buffer Data {
-    uint data[];
-} buf;
-
-void main() {
-    uint idx = gl_GlobalInvocationID.x;
-    buf.data[idx] *= 12;
-}"
-    }
 }

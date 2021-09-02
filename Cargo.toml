@@ -16,3 +16,4 @@ env_logger = "0.9"
 anyhow = "1.0.43"
 bytemuck = { version = "1.7", features = [ "derive" ] }
 image = "0.23.14"
+cgmath = "0.18"

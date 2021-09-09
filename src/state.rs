@@ -1,4 +1,5 @@
 use anyhow::*;
+use std::time;
 use wgpu::{util::DeviceExt, VertexBufferLayout};
 use winit::{event::*, window::Window};
 
@@ -13,28 +14,28 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
-const VERTICES: &[[f32; 3]] = &[
-        [-0.5, 0.5, 0.0],
-        [-0.5, -0.5, 0.0],
-        [0.5, -0.5, 0.0],
-        [0.5, 0.5, 0.0],
+const VERTICES_A: &[[f32; 3]] = &[
+    [-0.5, 0.5, 0.0],
+    [-0.5, -0.5, 0.0],
+    [0.5, -0.5, 0.0],
+    [0.5, 0.5, 0.0],
 ];
 
-const NORMALS: &[[f32; 3]] = &[
-        [0.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 1.0, 0.0],
+const NORMALS_A: &[[f32; 3]] = &[
+    [0.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
 ];
 
-const UVS: &[[f32; 2]] = &[
-        [0.4131759, 0.00759614],
-        [0.0048659444, 0.43041354],
-        [0.28081453, 0.949397],
-        [0.85967, 0.84732914],
+const UVS_A: &[[f32; 2]] = &[
+    [0.4131759, 0.00759614],
+    [0.0048659444, 0.43041354],
+    [0.28081453, 0.949397],
+    [0.85967, 0.84732914],
 ];
 
-const INDICES: &[u32] = &[0, 1, 2, 0, 2, 3];
+const INDICES_A: &[u32] = &[0, 1, 2, 0, 2, 3];
 
 pub struct State {
     pub surface: wgpu::Surface,
@@ -50,6 +51,9 @@ pub struct State {
     pub camera_bind_group: wgpu::BindGroup,
     pub frame_count: u64,
     pub mesh: mesh::Mesh,
+    pub delta_time: time::Duration,
+    pub last_frame_time: time::Instant,
+    pub start_time: time::Instant,
 }
 
 impl State {
@@ -87,17 +91,17 @@ impl State {
 
         surface.configure(&device, &surface_cfg);
 
-        let diffuse_bytes = include_bytes!("happy-tree.png");
+        let diffuse_bytes = include_bytes!("cool.png");
 
         let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, Some("Tree texture"))
+            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, Some("Cool texture"))
                 .unwrap();
 
         let mesh_descriptor = mesh::MeshDescriptor {
-            vertices: VERTICES.to_vec(),
-            normals: NORMALS.to_vec(),
-            uvs: UVS.to_vec(),
-            triangles: INDICES.to_vec(),
+            vertices: VERTICES_A.to_vec(),
+            normals: NORMALS_A.to_vec(),
+            uvs: UVS_A.to_vec(),
+            triangles: INDICES_A.to_vec(),
             texture: diffuse_texture,
         };
 
@@ -127,8 +131,6 @@ impl State {
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
-
-        println!("camera uniform:\n{:?}", camera_uniform);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Uniform Buffer"),
@@ -176,7 +178,11 @@ impl State {
                 buffers: &[VertexBufferLayout {
                     array_stride: std::mem::size_of::<mesh::Vertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x3, // Position
+                        1 => Float32x3, // Normal
+                        2 => Float32x2  // UV
+                    ],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -219,6 +225,9 @@ impl State {
             camera_bind_group,
             frame_count: 0,
             mesh,
+            delta_time: time::Duration::from_millis(13),
+            last_frame_time: time::Instant::now(),
+            start_time: time::Instant::now(),
         }
     }
 
@@ -231,19 +240,32 @@ impl State {
         }
     }
 
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
+    pub fn input<T>(&mut self, event: &Event<T>) -> bool {
+        use winit::event::*;
         match event {
+            Event::DeviceEvent {
+                ref event,
+                device_id: _,
+            } => match event {
+                DeviceEvent::MouseMotion { delta } => {
+                    //println!("mouse movido! {:?}", delta);
+                    true
+                }
+                _ => false,
+            },
             _ => false,
         }
     }
 
     pub fn update(&mut self) {
-        self.camera.eye = (
-            ((self.frame_count as f32) / 100.0).sin() * 3.0,
-            0.0,
-            ((self.frame_count as f32) / 100.0).cos() * 3.0,
-        )
-            .into();
+        self.delta_time = self.last_frame_time.elapsed();
+        self.last_frame_time = time::Instant::now();
+        println!(
+            "{},{}",
+            self.start_time.elapsed().as_secs_f32(),
+            self.delta_time.as_secs_f32(),
+        );
+        self.camera.eye = (-10.0 + self.start_time.elapsed().as_secs_f32(), 0.0, 3.0).into();
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(
             &self.camera_buffer,

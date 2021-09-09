@@ -30,10 +30,15 @@ pub struct Mesh {
 
 impl MeshDescriptor {
     pub fn bake(&self, device: &wgpu::Device) -> Mesh {
+        // TODO: Currently sending an array of structs, could send various arrays
+        // (more than one buffer) as we already are storing in that format.
+        // Need to change how vertex attributes are declared.
+        // works for now though.
+
         // Really crazy vector manipulation.
         // Basically collapsing each of vertices, normals and uvs to a single
         // vertex and making a vector from them.
-        let vertices_with_attachments = self
+        let vertices_with_attributes = self
             .vertices
             .iter()
             .zip(self.normals.iter().zip(self.uvs.iter()))
@@ -47,7 +52,7 @@ impl MeshDescriptor {
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             usage: wgpu::BufferUsages::VERTEX,
-            contents: bytemuck::cast_slice(&vertices_with_attachments[..]),
+            contents: bytemuck::cast_slice(&vertices_with_attributes[..]),
         });
 
         let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -58,31 +63,30 @@ impl MeshDescriptor {
 
         let indices_count = self.triangles.len() as u32;
 
-        let texture_layout =  
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler {
-                            comparison: false,
-                            filtering: true,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler {
+                        comparison: false,
+                        filtering: true,
                     },
-                ],
-                label: Some("Texture Bind Group Layout"),
-            });
+                    count: None,
+                },
+            ],
+            label: Some("Texture Bind Group Layout"),
+        });
 
         let texture = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &texture_layout,
@@ -110,6 +114,8 @@ impl MeshDescriptor {
 }
 
 // TODO: Change to something useful (need to pass self as parameter at least!!).
+// We are currently using the surface, the device and the camera bind group (uniform).
+// So we would need to abstract that away for it to work...
 impl Mesh {
     pub fn draw(state: &state::State) -> Result<()> {
         let frame = state.surface.get_current_frame()?.output;

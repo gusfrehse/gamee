@@ -1,7 +1,7 @@
 use anyhow::*;
 use std::time;
 use wgpu::{util::DeviceExt, VertexBufferLayout};
-use winit::{event::*, window::Window};
+use winit::{event::*, event_loop::ControlFlow, window::Window};
 
 use crate::mesh;
 use crate::texture;
@@ -240,32 +240,76 @@ impl State {
         }
     }
 
-    pub fn input<T>(&mut self, event: &Event<T>) -> bool {
+    pub fn input<T>(&mut self, event: &Event<T>) -> ControlFlow {
         use winit::event::*;
         match event {
+            Event::WindowEvent {
+                ref event,
+                window_id: _,
+            } => match event {
+                WindowEvent::Resized(physical_size) => {
+                    self.resize(*physical_size);
+                }
+                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                    self.resize(**new_inner_size);
+                }
+                WindowEvent::CloseRequested => return ControlFlow::Exit,
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            virtual_keycode: Some(keycode),
+                            state: ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => return self.keyboard_input(keycode),
+                _ => {}
+            },
             Event::DeviceEvent {
+                // Do not use device events for key board input, use window events
                 ref event,
                 device_id: _,
             } => match event {
-                DeviceEvent::MouseMotion { delta } => {
-                    //println!("mouse movido! {:?}", delta);
-                    true
-                }
-                _ => false,
+                // TODO: Put here mouse movement
+                _ => {},
             },
-            _ => false,
+            _ => {},
+        };
+
+        ControlFlow::Poll
+    }
+
+    fn keyboard_input(&mut self, keycode: &VirtualKeyCode) -> ControlFlow {
+        let speed = 1000.0;
+        match keycode {
+            VirtualKeyCode::W => self.camera.eye.y += speed * self.delta_time.as_secs_f32(),
+            VirtualKeyCode::A => self.camera.eye.x -= speed * self.delta_time.as_secs_f32(),
+            VirtualKeyCode::S => self.camera.eye.y -= speed * self.delta_time.as_secs_f32(),
+            VirtualKeyCode::D => self.camera.eye.x += speed * self.delta_time.as_secs_f32(),
+            _ => (),
+        }
+
+        if *keycode == VirtualKeyCode::Escape {
+            ControlFlow::Exit
+        } else {
+            ControlFlow::Poll
         }
     }
 
     pub fn update(&mut self) {
         self.delta_time = self.last_frame_time.elapsed();
         self.last_frame_time = time::Instant::now();
-        println!(
-            "{},{}",
-            self.start_time.elapsed().as_secs_f32(),
-            self.delta_time.as_secs_f32(),
-        );
-        self.camera.eye = (-10.0 + self.start_time.elapsed().as_secs_f32(), 0.0, 3.0).into();
+        //println!(
+        //    "\r{},{}",
+        //    self.start_time.elapsed().as_secs_f32(),
+        //    self.delta_time.as_secs_f32(),
+        //);
+        //self.camera.eye = (
+        //    self.start_time.elapsed().as_secs_f32().sin() * 3.0,
+        //    0.0,
+        //    3.0,
+        //)
+        //    .into();
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(
             &self.camera_buffer,

@@ -144,6 +144,8 @@ impl Controller {
             MouseScrollDelta::LineDelta(_, scroll) => scroll * 10.0,
             MouseScrollDelta::PixelDelta(PhysicalPosition { y: scroll, .. }) => *scroll as f32,
         };
+
+        self.speed -= self.scroll;
     }
 
     pub fn update_camera(&mut self, camera: &mut Camera, dt: std::time::Duration) {
@@ -153,20 +155,21 @@ impl Controller {
         let forward = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
         let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
 
-        let mut displacement = 
-            forward * (self.amount_forward - self.amount_backward) +
-            right * (self.amount_right - self.amount_left) + 
-            Vector3::unit_y() * (self.amount_up - self.amount_down);
-        displacement *= dt* self.speed;
+        let mut displacement = forward * (self.amount_forward - self.amount_backward)
+            + right * (self.amount_right - self.amount_left)
+            + Vector3::unit_y() * (self.amount_up - self.amount_down);
 
-        camera.pos += displacement;
+        if !displacement.is_zero() {
+            displacement = displacement.normalize();
+        }
+
+        camera.pos += displacement * dt * self.speed;
 
         // TODO: Scroll zoom stuff here
         self.scroll = 0.0;
 
         camera.yaw += Rad(self.rotate_horizontal) * self.sensitivity * dt;
         camera.pitch += Rad(-self.rotate_vertical) * self.sensitivity * dt;
-
 
         const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
         if camera.pitch < -Rad(SAFE_FRAC_PI_2) {
@@ -175,14 +178,14 @@ impl Controller {
             camera.pitch = Rad(SAFE_FRAC_PI_2);
         }
 
-        print!("\x1B[2J\x1B[1;1H");
-        println!(
-            "al: {:?} ar: {:?} af: {:?} ab: {:?} au: {:?} ad: {:?} rv: {:?} rh: {:?}",
-            self.amount_left, self.amount_right,
-            self.amount_forward, self.amount_backward, 
-            self.amount_up, self.amount_down, 
-            self.rotate_horizontal, self.rotate_vertical,
-        );
+        //print!("\x1B[2J\x1B[1;1H");
+        //println!(
+        //    "al: {:?} ar: {:?} af: {:?} ab: {:?} au: {:?} ad: {:?} rv: {:?} rh: {:?}",
+        //    self.amount_left, self.amount_right,
+        //    self.amount_forward, self.amount_backward,
+        //    self.amount_up, self.amount_down,
+        //    self.rotate_horizontal, self.rotate_vertical,
+        //);
         self.rotate_horizontal = 0.0;
         self.rotate_vertical = 0.0;
     }

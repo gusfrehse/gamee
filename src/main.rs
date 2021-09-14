@@ -7,6 +7,7 @@ use winit::{
 
 mod camera;
 mod mesh;
+mod meshgen;
 mod state;
 mod texture;
 

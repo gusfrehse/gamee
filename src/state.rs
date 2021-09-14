@@ -46,6 +46,7 @@ pub struct State {
     pub camera_bind_group: wgpu::BindGroup,
     pub frame_count: u64,
     pub mesh: mesh::Mesh,
+    pub depth_texture: texture::Texture,
     pub delta_time: time::Duration,
     pub last_frame_time: time::Instant,
     pub start_time: time::Instant,
@@ -93,13 +94,21 @@ impl State {
             texture::Texture::from_bytes(&device, &queue, diffuse_bytes, Some("Cool texture"))
                 .unwrap();
 
-        let mesh_descriptor = mesh::MeshDescriptor {
-            vertices: VERTICES_A.to_vec(),
-            normals: NORMALS_A.to_vec(),
-            uvs: UVS_A.to_vec(),
-            triangles: INDICES_A.to_vec(),
-            texture: diffuse_texture,
-        };
+        let depth_texture =
+            texture::Texture::create_depth_texture(&device, &surface_cfg, "depth_texture");
+
+        //let mesh_descriptor = mesh::Descriptor {
+        //    vertices: VERTICES_A.to_vec(),
+        //    normals: NORMALS_A.to_vec(),
+        //    uvs: UVS_A.to_vec(),
+        //    triangles: INDICES_A.to_vec(),
+        //    texture: diffuse_texture,
+        //};
+
+        let perlin_bytes = include_bytes!("cool.png");
+        let perlin_image = image::load_from_memory(perlin_bytes).unwrap();
+        let mut mesh_descriptor =
+            mesh::Descriptor::from_height_map(&perlin_image, 200, 200, 0.5, &device, &queue);
 
         let mesh = mesh_descriptor.bake(&device);
 
@@ -121,9 +130,9 @@ impl State {
             surface_cfg.height,
             cgmath::Deg(90.0),
             0.1,
-            100.0,
+            10000.0,
         );
-        let camera_controller = camera::Controller::new(2.0, 0.3);
+        let camera_controller = camera::Controller::new(10.0, 0.3);
 
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera, &projection);
@@ -199,7 +208,13 @@ impl State {
                 clamp_depth: false,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -223,6 +238,7 @@ impl State {
             camera_bind_group,
             frame_count: 0,
             mesh,
+            depth_texture,
             delta_time: time::Duration::from_millis(13),
             last_frame_time: time::Instant::now(),
             start_time: time::Instant::now(),
@@ -237,6 +253,11 @@ impl State {
             self.surface_cfg.width = new_size.width;
             self.surface_cfg.height = new_size.height;
             self.surface.configure(&self.device, &self.surface_cfg);
+            self.depth_texture = texture::Texture::create_depth_texture(
+                &self.device,
+                &self.surface_cfg,
+                "depth_texture",
+            );
         }
     }
 
@@ -261,13 +282,11 @@ impl State {
                 ref event,
                 device_id: _,
             } => match event {
-                DeviceEvent::Key(
-                    KeyboardInput {
-                            virtual_keycode: Some(keycode),
-                            state,
-                            ..
-                    }
-                ) => return self.keyboard_input(keycode, state), 
+                DeviceEvent::Key(KeyboardInput {
+                    virtual_keycode: Some(keycode),
+                    state,
+                    ..
+                }) => return self.keyboard_input(keycode, state),
 
                 DeviceEvent::MouseWheel { delta, .. } => {
                     self.camera_controller.process_scroll(delta);

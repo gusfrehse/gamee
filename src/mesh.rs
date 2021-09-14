@@ -12,7 +12,7 @@ pub struct Vertex {
     pub uv: [f32; 2],
 }
 
-pub struct MeshDescriptor {
+pub struct Descriptor {
     pub vertices: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
@@ -28,7 +28,7 @@ pub struct Mesh {
     pub texture_layout: wgpu::BindGroupLayout,
 }
 
-impl MeshDescriptor {
+impl Descriptor {
     pub fn bake(&self, device: &wgpu::Device) -> Mesh {
         // TODO: Currently sending an array of structs, could send various arrays
         // (more than one buffer) as we already are storing in that format.
@@ -141,7 +141,14 @@ impl Mesh {
                         store: true,
                     },
                 }],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &state.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
             });
 
             render_pass.set_pipeline(&state.render_pipeline);
